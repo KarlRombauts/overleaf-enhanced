@@ -1,4 +1,4 @@
-import { Size } from '../Types';
+import { Vector, Size } from '../Types';
 import { withinTolerance } from './mathUtils';
 
 export function getCssSize(element: HTMLElement) {
@@ -37,4 +37,21 @@ export function isApproxSize(
     withinTolerance(width, target.width, percent) &&
     withinTolerance(height, target.height, percent)
   );
+}
+
+export function getScrollPercent(
+  element: HTMLElement,
+  mousePos = { x: 0, y: 0 },
+) {
+  return {
+    x: (element.scrollLeft + mousePos.x) / element.scrollWidth,
+    y: (element.scrollTop + mousePos.y) / element.scrollHeight,
+  };
+}
+
+export function getMaxScroll(element: HTMLElement): Vector {
+  return {
+    x: element.scrollWidth,
+    y: element.scrollHeight,
+  };
 }

@@ -41,3 +41,35 @@ export function getScaleDownButton() {
   return document.querySelector<HTMLElement>('.pdfjs-controls .btn-group')
     ?.children[3] as HTMLElement | undefined;
 }
+
+export function getSizeCssString(selector: string, size: Size) {
+  return `
+	${selector} {
+		height: ${size.height}px !important;
+		width: ${size.width}px !important;
+	}
+	`;
+}
+
+export function injectStyleTag(id: string, css: string) {
+  const head = document.head || document.getElementsByTagName('head')[0];
+  const style = document.createElement('style');
+  style.id = id;
+  style.type = 'text/css';
+  style.innerHTML = css;
+  head.appendChild(style);
+}
+
+export function updateStyleTag(id: string, css: string) {
+  const style = document.getElementById(id);
+  if (!style) {
+    injectStyleTag(id, css);
+  } else {
+    style.innerHTML = css;
+  }
+}
+
+export function setPageSizeStyle(size: Size) {
+  const css = getSizeCssString('.pdfViewer .page', size);
+  updateStyleTag('pageSizeStyle', css);
+}

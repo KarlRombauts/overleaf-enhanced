@@ -1,46 +1,78 @@
 import { debounce, throttle } from 'throttle-debounce';
-import { getCssSize, setSizeFill } from './helper/elementUtils';
+import {
+  getCssSize,
+  getMaxScroll,
+  getScrollPercent,
+  setSizeFill,
+} from './helper/elementUtils';
 import { isZoom } from './helper/eventUtils';
 import { baseLog } from './helper/mathUtils';
 import {
   getScaleDownButton,
   getScaleUpButton,
   scaleVisualPageSizeByFactor,
+  setPageSizeStyle,
   setVisualPageSize,
 } from './helper/pageUtils';
 import { promiseSelector } from './helper/promiseSelector';
 import { scaleSizeByFactor } from './helper/sizeUtils';
-import { Size } from './Types';
+import { Vector, Size } from './Types';
 
 const ZOOM_SENSITIVITY = 0.01;
+const TRUE_SCALE_STEP = 0.25;
 
 export class PdfZoom {
   currentSize: Size | undefined;
   viewer: HTMLElement | null = null;
+  pageContainer: HTMLElement | null = null;
+  clickedControls = false;
   controls: Element | null = null;
   startedZoom = false;
+  startedScroll = false;
   startingSize: Size | undefined;
-  clickedControls = false;
+  visualUpdatesPaused = false;
+  prevScrollPercent = { x: 0, y: 0 };
+  mousePosition = { x: 0, y: 0 };
+  pauseTimeout: number | undefined;
 
   constructor() {}
 
   async init() {
     this.viewer = await promiseSelector('.pdfjs-viewer-inner');
+    this.pageContainer = await promiseSelector('.pdfViewer');
     this.controls = await promiseSelector('.pdfjs-controls');
-
     await promiseSelector('.pdfjs-viewer-inner .page');
     this.updateCurrentSize();
+    this.updateTrueSize();
     this.attachEventListeners();
-
-    setInterval(this.updateVisualPageSizes.bind(this), 100);
+    // setInterval(() => {
+    //   this.updateVisualPageSizes();
+    // }, 100);
   }
 
   attachEventListeners() {
     const debouncedStoppedZoom = debounce(1000, this.zoomEndHandler.bind(this));
     const throttledZoomHandler = throttle(20, this.zoomHandler.bind(this));
+    const debouncedStoppedScroll = debounce(
+      50,
+      this.scrollEndHandler.bind(this),
+    );
+    const throttledScrollHandler = throttle(50, this.scrollHandler.bind(this));
+    const debouncedUnlock = debounce(50, () => {
+      this.endTrueResizeHandler();
+    });
+
+    new ResizeObserver(() => {
+      if (this.clickedControls) {
+        this.clickedControls = false;
+        this.startingSize = this.getPageSize();
+        this.updateTrueSize();
+      }
+    }).observe(this.pageContainer!);
 
     this.viewer!.addEventListener('wheel', (event) => {
       if (isZoom(event)) {
+        this.endTrueResizeHandler();
         event.preventDefault();
         event.stopImmediatePropagation();
 
@@ -48,14 +80,75 @@ export class PdfZoom {
           this.zoomStartHandler(event);
         }
         throttledZoomHandler(event);
-        debouncedStoppedZoom(event, this.startingSize);
+        debouncedStoppedZoom(event);
+      }
+    });
+
+    this.viewer!.addEventListener('scroll', (event) => {
+      if (this.visualUpdatesPaused) {
+        // automatic scrolling due to true resizing
+        debouncedUnlock();
+      } else {
+        if (!this.startedScroll) {
+          this.scrollStartHandler(event);
+        }
+        throttledScrollHandler(event);
+        debouncedStoppedScroll(event);
       }
     });
 
     this.viewer!.addEventListener(
-      'scroll',
-      throttle(50, this.scrollHandler.bind(this)),
+      'mousemove',
+      throttle(100, this.updateMousePosition.bind(this)),
     );
+
+    this.controls!.addEventListener('click', (event) => {
+      if (event.isTrusted) {
+        this.clickedControls = true;
+      }
+      this.visualUpdatesPaused = true;
+    });
+  }
+
+  endTrueResizeHandler() {
+    if (this.visualUpdatesPaused) {
+      if (this.clickedControls) {
+        this.clickedControls = false;
+        this.updateCurrentSize();
+        this.updateTrueSize();
+      }
+      this.visualUpdatesPaused = false;
+    }
+  }
+
+  scrollEndHandler(event: Event) {
+    this.startedScroll = false;
+  }
+
+  scrollStartHandler(event: Event) {
+    this.startedScroll = true;
+  }
+
+  updateMousePosition(event: MouseEvent) {
+    const rect = this.viewer!.getBoundingClientRect();
+    this.mousePosition = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+    this.updatePrevScrollPercent();
+  }
+
+  pauseVisualUpdates(milliseconds: number, callback: () => any) {
+    if (this.visualUpdatesPaused) {
+      clearTimeout(this.pauseTimeout);
+    }
+    this.visualUpdatesPaused = true;
+    console.log('paused');
+    callback();
+    this.pauseTimeout = setTimeout(() => {
+      console.log('unpaused');
+      this.visualUpdatesPaused = false;
+    }, milliseconds);
   }
 
   getPages() {
@@ -78,86 +171,125 @@ export class PdfZoom {
     this.currentSize = this.getPageSize();
   }
 
-  updateStartingSize() {
-    setTimeout(() => {
-      this.startingSize = this.getPageSize();
-    }, 100);
+  updateTrueSize() {
+    this.startingSize = this.getPageSize();
   }
 
-  setVisualSize(size: Size) {}
-
-  truePageScaleUp() {
+  trueScaleUp() {
     getScaleUpButton()?.click();
-    this.updateStartingSize();
+    if (this.startingSize) {
+      this.startingSize = scaleSizeByFactor(
+        this.startingSize,
+        1 + TRUE_SCALE_STEP,
+      );
+    }
+    this.setScrollMousePercent(this.prevScrollPercent);
   }
 
-  truePageScaleDown() {
+  trueScaleDown() {
     getScaleDownButton()?.click();
-    this.updateStartingSize();
+    if (this.startingSize) {
+      this.startingSize = scaleSizeByFactor(
+        this.startingSize,
+        1 - TRUE_SCALE_STEP,
+      );
+    }
+    this.setScrollMousePercent(this.prevScrollPercent);
   }
 
-  setTrueSize(startingSize: Size, targetSize: Size) {
-    const ratio = targetSize.height / startingSize.height;
+  setTrueSize(targetSize: Size) {
+    const ratio = targetSize.height / this.startingSize!.height;
+    this.setScrollMousePercent(this.prevScrollPercent);
+    // this.pauseVisualUpdates(500, () => {
     if (ratio < 1) {
       const repeats = Math.round(baseLog(1 - 0.25, ratio));
       for (let i = 0; i < repeats; i++) {
-        this.truePageScaleDown();
+        this.trueScaleDown();
+        this.setScrollMousePercent(this.prevScrollPercent);
       }
     } else {
       const repeats = Math.round(baseLog(1 + 0.25, ratio));
       for (let i = 0; i < repeats; i++) {
-        this.truePageScaleUp();
+        this.trueScaleUp();
+        this.setScrollMousePercent(this.prevScrollPercent);
+      }
+    }
+    // });
+    setTimeout(() => {
+      this.setVisualSize(targetSize);
+      this.setScrollMousePercent(this.prevScrollPercent);
+      //   this.updateCurrentSize();
+    }, 0);
+  }
+
+  updatePrevScrollPercent() {
+    if (!this.visualUpdatesPaused) {
+      //   console.log('prev scroll updated');
+      this.prevScrollPercent = getScrollPercent(
+        this.viewer!,
+        this.mousePosition,
+      );
+    }
+  }
+
+  updateVisualPageSizes() {
+    if (this.currentSize && !this.visualUpdatesPaused) {
+      this.setVisualSize(this.currentSize);
+      if (!this.startedScroll) {
+        this.setScrollMousePercent(this.prevScrollPercent);
       }
     }
   }
 
+  private setVisualSize(targetSize: Size) {
+    this.getPages().forEach(setVisualPageSize(targetSize));
+    this.currentSize = targetSize;
+  }
+
+  setScrollPercent(percent: number) {
+    this.viewer!.scrollTop = getMaxScroll(this.viewer!).y * percent;
+  }
+
+  setScrollMousePercent(percent: Vector) {
+    const maxScroll = getMaxScroll(this.viewer!);
+    this.viewer!.scrollTop = maxScroll.y * percent.y - this.mousePosition.y;
+    this.viewer!.scrollLeft = maxScroll.x * percent.x - this.mousePosition.x;
+  }
+
   zoomStartHandler(event: WheelEvent) {
-    this.startingSize = this.getPageSize();
     this.updateCurrentSize();
+    this.updatePrevScrollPercent();
     this.startedZoom = true;
   }
 
   zoomHandler(event: WheelEvent) {
-    const zoomFactor = 1 - event.deltaY * ZOOM_SENSITIVITY;
-    console.log('zoom');
-    const pages = this.getPages();
-
-    const targetSize = scaleSizeByFactor(this.currentSize, zoomFactor);
-    if (!targetSize) {
+    if (!this.currentSize) {
       return;
     }
-    const scaleVisualPage = setVisualPageSize(targetSize);
-
-    pages.forEach(scaleVisualPage);
-    //   if (event.deltaY > 0) { // zoom out
-    // 	scaleVisualPageSizeByFactor(0.05);
-    //   }
-    //   if (event.deltaY < 0) { // zoom in
-    // 	increasePagesSize(pages, 0.05);
-    //   }
-
-    this.updateCurrentSize();
+    const zoomFactor = 1 - event.deltaY * ZOOM_SENSITIVITY;
+    const targetSize = scaleSizeByFactor(this.currentSize, zoomFactor);
+    setPageSizeStyle(targetSize);
+    this.currentSize = targetSize;
+    this.setScrollMousePercent(this.prevScrollPercent);
   }
 
-  zoomEndHandler(event: WheelEvent, startingSize: Size | undefined) {
-    console.log('stop', startingSize);
+  zoomEndHandler(event: WheelEvent) {
     this.updateCurrentSize();
-    if (!startingSize || !this.currentSize) {
+    if (!this.startingSize || !this.currentSize) {
       return;
     }
-    this.setTrueSize(startingSize, this.currentSize);
+    this.setTrueSize(this.currentSize);
     this.startedZoom = false;
   }
 
-  updateVisualPageSizes() {
-    if (this.currentSize && !this.clickedControls) {
-      const scaleVisualPage = setVisualPageSize(this.currentSize);
-      this.getPages().forEach(scaleVisualPage);
-    }
-  }
   scrollHandler(event: Event) {
+    // this.pauseVisualUpdates(100, () => {
+    this.updatePrevScrollPercent();
     this.updateVisualPageSizes();
+    // });
   }
+
+  trueSizeChangeHandler() {}
 }
 
 // async function fixPdfTrueScaling(startingSize) {
