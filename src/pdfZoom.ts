@@ -14,6 +14,7 @@ import {
   scaleVisualPageSizeByFactor,
   setPageSizeStyle,
   setVisualPageSize,
+  transformScaleToSize,
 } from './helper/pageUtils';
 import { promiseSelector } from './helper/promiseSelector';
 import { scaleSizeByFactor } from './helper/sizeUtils';
@@ -25,6 +26,7 @@ const TRUE_SCALE_STEP = 0.25;
 export class PdfZoom {
   currentSize: Size | undefined;
   viewer: HTMLElement | null = null;
+  pdfPane: HTMLElement | null = null;
   pageContainer: HTMLElement | null = null;
   clickedControls = false;
   controls: Element | null = null;
@@ -42,13 +44,28 @@ export class PdfZoom {
     this.viewer = await promiseSelector('.pdfjs-viewer-inner');
     this.pageContainer = await promiseSelector('.pdfViewer');
     this.controls = await promiseSelector('.pdfjs-controls');
+    this.pdfPane = (await promiseSelector('pdf-preview')).closest(
+      '.ui-layout-pane',
+    );
     await promiseSelector('.pdfjs-viewer-inner .page');
     this.updateCurrentSize();
     this.updateTrueSize();
     this.attachEventListeners();
-    // setInterval(() => {
-    //   this.updateVisualPageSizes();
-    // }, 100);
+  }
+
+  needsReInit() {
+    return (
+      !document.body.contains(this.viewer) ||
+      !document.body.contains(this.pageContainer) ||
+      !document.body.contains(this.controls)
+    );
+  }
+
+  async getElementRefs() {
+    this.viewer = await promiseSelector('.pdfjs-viewer-inner');
+    this.pageContainer = await promiseSelector('.pdfViewer');
+    this.controls = await promiseSelector('.pdfjs-controls');
+    await promiseSelector('.pdfjs-viewer-inner .page');
   }
 
   attachEventListeners() {
@@ -63,6 +80,10 @@ export class PdfZoom {
       this.endTrueResizeHandler();
     });
 
+    const debouncedReInit = debounce(50, this.init.bind(this), {
+      atBegin: true,
+    });
+
     new ResizeObserver(() => {
       if (this.clickedControls) {
         this.clickedControls = false;
@@ -71,8 +92,17 @@ export class PdfZoom {
       }
     }).observe(this.pageContainer!);
 
+    new MutationObserver((event) => {
+      if (this.needsReInit()) {
+        this.init();
+      }
+    }).observe(this.pdfPane!, { subtree: false, childList: true });
+
     this.viewer!.addEventListener('wheel', (event) => {
       if (isZoom(event)) {
+        if (this.needsReInit()) {
+          debouncedReInit();
+        }
         this.endTrueResizeHandler();
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -161,6 +191,10 @@ export class PdfZoom {
     return document.querySelectorAll<HTMLElement>('.pdfViewer .page');
   }
 
+  getTextLayers() {
+    return document.querySelectorAll<HTMLElement>('.pdfViewer .textLayer');
+  }
+
   getFirstPage() {
     return document.querySelector<HTMLElement>('.pdfViewer .page');
   }
@@ -224,7 +258,7 @@ export class PdfZoom {
     setTimeout(() => {
       this.setVisualSize(targetSize);
       this.setScrollMousePercent(this.prevScrollPercent);
-      //   this.updateCurrentSize();
+      this.scaleTextLayers();
     }, 0);
   }
 
@@ -268,6 +302,14 @@ export class PdfZoom {
     this.startedZoom = true;
   }
 
+  scaleTextLayers() {
+    if (!this.startingSize || !this.currentSize) {
+      return;
+    }
+    this.getTextLayers().forEach(
+      transformScaleToSize(this.startingSize, this.currentSize),
+    );
+  }
   zoomHandler(event: WheelEvent) {
     if (!this.currentSize) {
       return;
@@ -275,6 +317,8 @@ export class PdfZoom {
     const zoomFactor = 1 - event.deltaY * ZOOM_SENSITIVITY;
     const targetSize = scaleSizeByFactor(this.currentSize, zoomFactor);
     setPageSizeStyle(targetSize);
+    this.scaleTextLayers();
+
     this.currentSize = targetSize;
     this.setScrollMousePercent(this.prevScrollPercent);
   }

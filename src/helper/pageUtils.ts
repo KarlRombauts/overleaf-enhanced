@@ -81,9 +81,7 @@ export function updateStyleTag(id: string, css: string) {
 }
 
 export function setPageSizeStyle(size: Size) {
-  const css =
-    getSizeCssString('.pdfViewer .page', size) +
-    getScaleToParentCssString('.pdfViewer .page .textLayer', size);
+  const css = getSizeCssString('.pdfViewer .page', size);
 
   updateStyleTag('pageSizeStyle', css);
 }
@@ -94,18 +92,13 @@ export function clearPageSizeStyle() {
 
 function getScaleRatio(from: Size, to: Size) {
   const scaleX = to.width / from.width;
-  const scaleY = to.height / from.width;
+  const scaleY = to.height / from.height;
   return { scaleX, scaleY };
 }
 
-function getTransformScaleToParent(selector: string, parentSize: Size) {
-  const element = document.querySelector<HTMLElement>(selector);
-  if (!element) {
-    return;
-  }
-  element.style.transform = 'none';
-  const elementSize = element.getBoundingClientRect();
-  const { scaleX } = getScaleRatio(elementSize, parentSize);
-  element.style.transform = '';
-  return `scale(${scaleX})`;
-}
+export const transformScaleToSize = curry(
+  (from: Size, to: Size, element: HTMLElement) => {
+    const { scaleX, scaleY } = getScaleRatio(from, to);
+    element.style.transform = `scale(${scaleX}, ${scaleY})`;
+  },
+);
