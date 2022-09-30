@@ -97,8 +97,7 @@ button:focus-visible {
 }
 
 div.pdfViewer canvas,
-div.pdfViewer .canvasWrapper,
-div.pdfViewer .textLayer {
+div.pdfViewer .canvasWrapper {
   width: 100% !important;
   height: 100% !important;
 }

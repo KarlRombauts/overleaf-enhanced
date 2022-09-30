@@ -8,6 +8,7 @@ import {
 import { isZoom } from './helper/eventUtils';
 import { baseLog } from './helper/mathUtils';
 import {
+  clearPageSizeStyle,
   getScaleDownButton,
   getScaleUpButton,
   scaleVisualPageSizeByFactor,
@@ -104,18 +105,23 @@ export class PdfZoom {
 
     this.controls!.addEventListener('click', (event) => {
       if (event.isTrusted) {
-        this.clickedControls = true;
+        this.startTrueResizeHandler();
       }
       this.visualUpdatesPaused = true;
     });
   }
 
+  startTrueResizeHandler() {
+    this.clickedControls = true;
+    clearPageSizeStyle();
+  }
   endTrueResizeHandler() {
     if (this.visualUpdatesPaused) {
       if (this.clickedControls) {
         this.clickedControls = false;
         this.updateCurrentSize();
         this.updateTrueSize();
+        setPageSizeStyle(this.currentSize!);
       }
       this.visualUpdatesPaused = false;
     }

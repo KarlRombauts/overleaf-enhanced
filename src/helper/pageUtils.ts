@@ -15,7 +15,6 @@ export const setVisualPageSize = curry(function (
   const children = removeNulls([
     page.querySelector<HTMLElement>('canvas'),
     page.querySelector<HTMLElement>('.canvasWrapper'),
-    page.querySelector<HTMLElement>('.textLayer'),
   ]);
 
   children.forEach(setSizeFill);
@@ -51,6 +50,18 @@ export function getSizeCssString(selector: string, size: Size) {
 	`;
 }
 
+function getScaleToParentCssString(selector: string, parentSize: Size) {
+  return `
+	${selector} {
+		position: absolute;
+		top: 0;
+		left: 0;
+		transform-origin: top left;
+		transform: ${getTransformScaleToParent(selector, parentSize)};
+	}
+	`;
+}
+
 export function injectStyleTag(id: string, css: string) {
   const head = document.head || document.getElementsByTagName('head')[0];
   const style = document.createElement('style');
@@ -70,6 +81,31 @@ export function updateStyleTag(id: string, css: string) {
 }
 
 export function setPageSizeStyle(size: Size) {
-  const css = getSizeCssString('.pdfViewer .page', size);
+  const css =
+    getSizeCssString('.pdfViewer .page', size) +
+    getScaleToParentCssString('.pdfViewer .page .textLayer', size);
+
   updateStyleTag('pageSizeStyle', css);
+}
+
+export function clearPageSizeStyle() {
+  updateStyleTag('pageSizeStyle', '');
+}
+
+function getScaleRatio(from: Size, to: Size) {
+  const scaleX = to.width / from.width;
+  const scaleY = to.height / from.width;
+  return { scaleX, scaleY };
+}
+
+function getTransformScaleToParent(selector: string, parentSize: Size) {
+  const element = document.querySelector<HTMLElement>(selector);
+  if (!element) {
+    return;
+  }
+  element.style.transform = 'none';
+  const elementSize = element.getBoundingClientRect();
+  const { scaleX } = getScaleRatio(elementSize, parentSize);
+  element.style.transform = '';
+  return `scale(${scaleX})`;
 }
