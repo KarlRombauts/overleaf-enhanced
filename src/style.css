@@ -102,6 +102,10 @@ div.pdfViewer .canvasWrapper {
   height: 100% !important;
 }
 
+div.pdfViewer .page {
+  overflow: hidden;
+}
+
 div.pdfViewer .textLayer {
   transform-origin: top left;
   position: absolute;

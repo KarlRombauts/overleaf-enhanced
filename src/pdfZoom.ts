@@ -13,8 +13,10 @@ import {
   getScaleUpButton,
   scaleVisualPageSizeByFactor,
   setPageSizeStyle,
+  setTextLayerStyle,
   setVisualPageSize,
   transformScaleToSize,
+  transformScaleToSizeCssString,
 } from './helper/pageUtils';
 import { promiseSelector } from './helper/promiseSelector';
 import { scaleSizeByFactor } from './helper/sizeUtils';
@@ -44,9 +46,8 @@ export class PdfZoom {
     this.viewer = await promiseSelector('.pdfjs-viewer-inner');
     this.pageContainer = await promiseSelector('.pdfViewer');
     this.controls = await promiseSelector('.pdfjs-controls');
-    this.pdfPane = (await promiseSelector('pdf-preview')).closest(
-      '.ui-layout-pane',
-    );
+    this.pdfPane =
+      document.querySelector('pdf-preview')?.closest('.ui-layout-pane') || null;
     await promiseSelector('.pdfjs-viewer-inner .page');
     this.updateCurrentSize();
     this.updateTrueSize();
@@ -92,11 +93,13 @@ export class PdfZoom {
       }
     }).observe(this.pageContainer!);
 
-    new MutationObserver((event) => {
-      if (this.needsReInit()) {
-        this.init();
-      }
-    }).observe(this.pdfPane!, { subtree: false, childList: true });
+    if (this.pdfPane) {
+      new MutationObserver((event) => {
+        if (this.needsReInit()) {
+          this.init();
+        }
+      }).observe(this.pdfPane!, { subtree: false, childList: true });
+    }
 
     this.viewer!.addEventListener('wheel', (event) => {
       if (isZoom(event)) {
@@ -152,6 +155,7 @@ export class PdfZoom {
         this.updateCurrentSize();
         this.updateTrueSize();
         setPageSizeStyle(this.currentSize!);
+        setTextLayerStyle(this.startingSize!, this.currentSize!);
       }
       this.visualUpdatesPaused = false;
     }
@@ -179,10 +183,8 @@ export class PdfZoom {
       clearTimeout(this.pauseTimeout);
     }
     this.visualUpdatesPaused = true;
-    console.log('paused');
     callback();
     this.pauseTimeout = setTimeout(() => {
-      console.log('unpaused');
       this.visualUpdatesPaused = false;
     }, milliseconds);
   }
@@ -260,11 +262,13 @@ export class PdfZoom {
       this.setScrollMousePercent(this.prevScrollPercent);
       this.scaleTextLayers();
     }, 0);
+    setTimeout(() => {
+      this.scaleTextLayers();
+    }, 100);
   }
 
   updatePrevScrollPercent() {
     if (!this.visualUpdatesPaused) {
-      //   console.log('prev scroll updated');
       this.prevScrollPercent = getScrollPercent(
         this.viewer!,
         this.mousePosition,
@@ -306,9 +310,7 @@ export class PdfZoom {
     if (!this.startingSize || !this.currentSize) {
       return;
     }
-    this.getTextLayers().forEach(
-      transformScaleToSize(this.startingSize, this.currentSize),
-    );
+    setTextLayerStyle(this.startingSize, this.currentSize);
   }
   zoomHandler(event: WheelEvent) {
     if (!this.currentSize) {
@@ -317,8 +319,6 @@ export class PdfZoom {
     const zoomFactor = 1 - event.deltaY * ZOOM_SENSITIVITY;
     const targetSize = scaleSizeByFactor(this.currentSize, zoomFactor);
     setPageSizeStyle(targetSize);
-    this.scaleTextLayers();
-
     this.currentSize = targetSize;
     this.setScrollMousePercent(this.prevScrollPercent);
   }
@@ -333,10 +333,8 @@ export class PdfZoom {
   }
 
   scrollHandler(event: Event) {
-    // this.pauseVisualUpdates(100, () => {
     this.updatePrevScrollPercent();
     this.updateVisualPageSizes();
-    // });
   }
 
   trueSizeChangeHandler() {}

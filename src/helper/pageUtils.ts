@@ -102,3 +102,26 @@ export const transformScaleToSize = curry(
     element.style.transform = `scale(${scaleX}, ${scaleY})`;
   },
 );
+
+export function transformScaleToSizeCssString(
+  from: Size,
+  to: Size,
+  selector: string,
+) {
+  const { scaleX, scaleY } = getScaleRatio(from, to);
+
+  return `
+	  	${selector} {
+			transform: scale(${scaleX}, ${scaleY})
+		}
+	  `;
+}
+
+export function setTextLayerStyle(from: Size, to: Size) {
+  const css = transformScaleToSizeCssString(from, to, '.pdfViewer .textLayer');
+  updateStyleTag('textSizeStyle', css);
+}
+
+export function clearTextLayerStyle() {
+  updateStyleTag('textSizeStyle', '');
+}
